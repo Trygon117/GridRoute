@@ -1,0 +1,31 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C++ Extensions & Build artifacts
+build/
+dist/
+*.egg-info/
+*.so
+*.pyd
+*.dylib
+*.o
+.ninja_deps
+.ninja_log
+
+# Environments
+.env
+.venv
+env/
+venv/
+
+# Data and model checkpoints
+data/
+*.pt
+*.pth
+
+# Pytest & IDE cache
+.pytest_cache/
+.vscode/
+.idea/
