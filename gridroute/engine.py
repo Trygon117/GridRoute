@@ -24,12 +24,12 @@ def _compile_condition_fn(fn: Callable, num_outputs: int) -> torch.jit.ScriptFun
     """
     sig = inspect.signature(fn)
     params = list(sig.parameters.values())
-    expected_args = 1 + num_outputs
+    expected_args = 2 + num_outputs
 
     if len(params) != expected_args:
         raise ValueError(
             f"Condition function '{fn.__name__}' expects {len(params)} arguments, "
-            f"but must accept {expected_args}: (step, *outputs)."
+            f"but must accept {expected_args}: (current_block, step, *outputs)."
         )
 
     source_lines, _ = inspect.getsourcelines(fn)
@@ -54,9 +54,10 @@ def _compile_condition_fn(fn: Callable, num_outputs: int) -> torch.jit.ScriptFun
     if func_def is None:
         raise RuntimeError(f"Could not parse condition function '{fn.__name__}'.")
 
-    # Inject TorchScript type annotations into the AST: (step: int, out0: torch.Tensor, ...) -> int
+    # Inject TorchScript type annotations into the AST: (current_block: int, step: int, out0: Tensor, ...) -> int
     func_def.args.args[0].annotation = ast.Name(id="int", ctx=ast.Load())
-    for arg in func_def.args.args[1:]:
+    func_def.args.args[1].annotation = ast.Name(id="int", ctx=ast.Load())
+    for arg in func_def.args.args[2:]:
         arg.annotation = ast.Name(id="Tensor", ctx=ast.Load())
     func_def.returns = ast.Name(id="int", ctx=ast.Load())
 
@@ -220,15 +221,16 @@ class Engine(nn.Module):
                     f"but schema specifies {len(spec.outputs)} output slots."
                 )
 
-            for slot_name, val in zip(spec.outputs, out_tuples):
-                self.slot_views[slot_name].copy_(val)
+            with torch.no_grad():
+                for slot_name, val in zip(spec.outputs, out_tuples):
+                    self.slot_views[slot_name].copy_(val)
 
             # 4. Update step counter for this block and evaluate JIT condition
             block_exec_counts[current_block] += 1
             total_steps += 1
 
             out_views = [self.slot_views[name] for name in spec.outputs]
-            next_block = cond(block_exec_counts[current_block], *out_views)
+            next_block = cond(current_block, block_exec_counts[current_block], *out_views)
             current_block = int(next_block)
 
         # Return requested output slot(s)

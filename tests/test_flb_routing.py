@@ -1,3 +1,4 @@
+from typing import Tuple, List, Dict, Callable
 import torch
 import torch.nn as nn
 import pytest
@@ -22,7 +23,7 @@ def test_contiguous_memory_allocation():
     schema.add_var("flag", dtype=torch.float32)
 
     mod = nn.Identity()
-    schema.add_block(mod, lambda step, out: -1, inputs="a", outputs="b")
+    schema.add_block(mod, lambda curr_block, step, out: -1, inputs="a", outputs="b")
 
     engine = gridroute.Engine(schema, use_cpp=False)
     pool = engine.storage_Buffers[torch.float32]
@@ -46,9 +47,9 @@ def test_dynamic_equilibrium_convergence():
             return x * 0.5
 
     # Loop Block 0 until the norm of 'state' drops below 0.2, then halt (-1)
-    def until_converged(step, state):
+    def until_converged(current_block, step, state):
         if state.norm() > 0.2 and step < 10:
-            return 0
+            return current_block
         return -1
 
     schema.add_block(DecayModule(), until_converged, inputs="state", outputs="state")
@@ -78,10 +79,10 @@ def test_flb_recurrent_sweep_parity():
     schema.add_slot("h1", shape=shape)
 
     # Run 3 full sweeps: Block 0 -> Block 1 -> Block 0 -> ... -> Halt after 3 sweeps
-    def cond_l0(step, h0):
+    def cond_l0(current_block, step, h0):
         return 1  # Always proceed to Layer 1
 
-    def cond_l1(step, h1):
+    def cond_l1(current_block, step, h1):
         if step < 3:
             return 0  # Sweep back to Layer 0
         return -1     # Done after 3 sweeps
@@ -102,3 +103,39 @@ def test_flb_recurrent_sweep_parity():
         h1_ref = layer1(h0_ref, h1_ref, h1_ref)
 
     assert torch.allclose(gridroute_out, h1_ref, atol=1e-6)
+
+
+def test_scalar_variable_routing():
+    """Verify that scalar variables passed as slots can be incremented and routed."""
+    class IncrementModule(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.proj = nn.Linear(2, 2, bias=False)
+
+        def forward(self, x: torch.Tensor, var: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            return self.proj(x), var + 1.0
+
+    schema = gridroute.Schema()
+    schema.add_slot("input", shape=(1, 2))
+    schema.add_slot("output", shape=(1, 2))
+    schema.add_var("var_name", dtype=torch.float32)
+
+    def cond(current_block, step, out, var):
+        if var.item() < 3.0:
+            return current_block
+        return -1
+
+    mod = IncrementModule()
+    schema.add_block(mod, cond, inputs=["input", "var_name"], outputs=["output", "var_name"])
+
+    engine = gridroute.Engine(schema, use_cpp=False)
+    
+    x_init = torch.ones((1, 2))
+    var_init = torch.zeros((1,))
+    
+    final_out, final_var = engine(
+        inputs={"input": x_init, "var_name": var_init},
+        outputs=["output", "var_name"]
+    )
+    
+    assert final_var.item() == 3.0

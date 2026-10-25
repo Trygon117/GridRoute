@@ -16,7 +16,7 @@ setup(
             ],
             include_dirs=["csrc"],
             extra_compile_args={
-                "cxx": ["-O3", "-std=c++17"]
+                "cxx": ["-O3", "-std=c++20"]
             },
         )
     ],
