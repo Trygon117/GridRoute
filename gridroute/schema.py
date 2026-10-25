@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 
@@ -9,6 +9,7 @@ class SlotSpec:
     name: str
     shape: Tuple[int, ...]
     dtype: torch.dtype
+    default: Optional[Union[int, float, bool]] = None
 
 @dataclass
 class BlockSpec:
@@ -29,7 +30,7 @@ class Schema:
         self.slots: Dict[str, SlotSpec] = {}
         self.blocks: List[BlockSpec] = []
 
-    def add_slot(self, name: str, shape: Union[Tuple[int, ...], List[int]], dtype: torch.dtype = torch.float32, ) -> None:
+    def add_slot(self, name: str, shape: Union[Tuple[int, ...], List[int]], dtype: torch.dtype = torch.float32, default: Optional[Union[int, float, bool]] = None) -> None:
         """Register a named tensor memory slot with a fixed shape."""
         if name in self.slots:
             raise ValueError(f"Memory slot '{name}' is already registered.")
@@ -40,11 +41,12 @@ class Schema:
             name=name,
             shape=tuple(shape),
             dtype=dtype,
+            default=default
         )
 
-    def add_var(self, name: str, dtype: torch.dtype = torch.float32, ) -> None:
+    def add_var(self, name: str, dtype: torch.dtype = torch.float32, default: Optional[Union[int, float, bool]] = 0) -> None:
         """Register a 1-element tensor slot to act as a scalar flag or metric."""
-        self.add_slot(name=name, shape=(1,), dtype=dtype)
+        self.add_slot(name=name, shape=(1,), dtype=dtype, default=default)
 
     def add_block(self, module: nn.Module, condition_fn: Callable, inputs: Union[str, List[str]], outputs: Union[str, List[str]], ) -> int:
         """

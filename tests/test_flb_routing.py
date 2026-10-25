@@ -131,7 +131,7 @@ def test_scalar_variable_routing():
     engine = gridroute.Engine(schema, use_cpp=False)
     
     x_init = torch.ones((1, 2))
-    var_init = torch.zeros((1,))
+    var_init = 0.0
     
     final_out, final_var = engine(
         inputs={"input": x_init, "var_name": var_init},

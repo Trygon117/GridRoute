@@ -165,11 +165,14 @@ class Engine(nn.Module):
             self._cpp_router = _C.Router()
 
     def reset_memory(self) -> None:
-        """Zeros out all contiguous memory buffers in a single operation per dtype."""
+        """Zeros out all contiguous memory buffers and restores default scalar values."""
         for buf in self.storage_Buffers.values():
             buf.zero_()
+        for name, spec in self.schema.slots.items():
+            if spec.default is not None and spec.default != 0:
+                self.slot_views[name].fill_(spec.default)
 
-    def forward(self,inputs: Dict[str, torch.Tensor], outputs: Union[str, List[str]], start_block: int = 0, max_steps: int = 1000, ) -> Union[torch.Tensor, List[torch.Tensor]]:
+    def forward(self, inputs: Dict[str, Union[torch.Tensor, int, float, bool]], outputs: Union[str, List[str]], start_block: int = 0, max_steps: int = 1000, ) -> Union[torch.Tensor, List[torch.Tensor]]:
         """
         Executes the dynamic routing graph starting from start_block until a
         block's condition function returns -1.
@@ -177,27 +180,33 @@ class Engine(nn.Module):
         self.reset_memory()
 
         # Copy initial inputs directly into their contiguous slot views
-        for slot_name, tensor in inputs.items():
+        for slot_name, val in inputs.items():
             if slot_name not in self.slot_views:
                 raise KeyError(f"Unknown input slot '{slot_name}'.")
-            if tensor.shape != self.slot_views[slot_name].shape:
-                raise ValueError(
-                    f"Input tensor for slot '{slot_name}' has shape {tuple(tensor.shape)}, "
-                    f"expected {self.slot_views[slot_name].shape}."
-                )
-            self.slot_views[slot_name].copy_(tensor)
+            # Allow plain Python scalars (e.g., 1.0) or 0D tensors for scalar variable slots
+            if isinstance(val, (int, float, bool)) or (isinstance(val, torch.Tensor) and val.ndim == 0):
+                if self.slot_views[slot_name].numel() != 1:
+                    raise ValueError(
+                        f"Cannot assign scalar value to non-scalar slot '{slot_name}' "
+                        f"with shape {self.slot_views[slot_name].shape}."
+                    )
+                self.slot_views[slot_name].fill_(val)
+            elif isinstance(val, torch.Tensor):
+                if val.shape != self.slot_views[slot_name].shape:
+                    raise ValueError(
+                        f"Input tensor for slot '{slot_name}' has shape {tuple(val.shape)}, "
+                        f"expected {self.slot_views[slot_name].shape}."
+                    )
+                self.slot_views[slot_name].copy_(val)
+            else:
+                raise TypeError(f"Unsupported input type {type(val)} for slot '{slot_name}'.")
 
         # Execute state machine
         current_block = start_block
         block_exec_counts = [0] * len(self.schema.blocks)
         total_steps = 0
 
-        while current_block != -1:
-            if current_block < 0 or current_block >= len(self.schema.blocks):
-                raise RuntimeError(
-                    f"Condition returned invalid block ID {current_block}. "
-                    f"Valid IDs are 0..{len(self.schema.blocks) - 1} or -1 to halt."
-                )
+        while 0 <= current_block < len(self.schema.blocks):
             if total_steps >= max_steps:
                 raise RuntimeError(
                     f"Routing exceeded max_steps ({max_steps}) without halting (-1)."
