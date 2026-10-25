@@ -3,14 +3,12 @@ from typing import Callable, Dict, List, Tuple, Union
 import torch
 import torch.nn as nn
 
-
 @dataclass
 class SlotSpec:
     """Blueprint for a single tensor slot in the contiguous memory pool."""
     name: str
     shape: Tuple[int, ...]
     dtype: torch.dtype
-
 
 @dataclass
 class BlockSpec:
@@ -20,7 +18,6 @@ class BlockSpec:
     condition_fn: Callable
     inputs: List[str]
     outputs: List[str]
-
 
 class Schema:
     """
